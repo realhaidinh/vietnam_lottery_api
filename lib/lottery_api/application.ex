@@ -10,6 +10,7 @@ defmodule LotteryApi.Application do
     children = [
       # Starts a worker by calling: LotteryApi.Worker.start_link(arg)
       # {LotteryApi.Worker, arg}
+      {LotteryApi.Scraper, []}
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html
