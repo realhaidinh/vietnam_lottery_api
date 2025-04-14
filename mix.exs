@@ -27,7 +27,8 @@ defmodule LotteryApi.MixProject do
       {:req, "~> 0.5.0"},
       {:floki, "~> 0.37.0"},
       {:html5ever, "~> 0.15.0"},
-      {:tzdata, "~> 1.1"}
+      {:tzdata, "~> 1.1"},
+      {:bandit, "~> 1.6"}
     ]
   end
 end

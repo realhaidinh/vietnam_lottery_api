@@ -2,7 +2,6 @@ defmodule LotteryApi.Application do
   # See https://hexdocs.pm/elixir/Application.html
   # for more information on OTP Applications
   @moduledoc false
-
   use Application
 
   @impl true
@@ -10,7 +9,8 @@ defmodule LotteryApi.Application do
     children = [
       # Starts a worker by calling: LotteryApi.Worker.start_link(arg)
       # {LotteryApi.Worker, arg}
-      {LotteryApi.Scraper, []}
+      {LotteryApi.Scraper, []},
+      {Bandit, plug: LotteryApi.Router}
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html
