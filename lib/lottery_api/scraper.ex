@@ -5,37 +5,58 @@ defmodule LotteryApi.Scraper do
   def start_link(_opts) do
     GenServer.start_link(__MODULE__, :ok, name: __MODULE__)
   end
-
+  @prizes_table :prizes_table
   @impl true
   def init(:ok) do
-    state = get_lottery_prizes()
-    {:ok, state}
+    opts = [:set, :protected, :named_table, read_concurrency: true, write_concurrency: true]
+    prizes = :ets.new(@prizes_table, opts)
+    {:ok, prizes, {:continue, :scraping}}
   end
 
   @impl true
-  def handle_info(:scraping, _state) do
-    state = get_lottery_prizes()
+  def handle_continue(:scraping, prizes) do
+    regions = [:mb, :mn, :mt]
+    for region_prizes <- get_prizes(regions) do
+      :ets.insert(prizes, region_prizes)
+    end
+    {:noreply, prizes}
+  end
+
+  @impl true
+  def handle_info({:scraping, region}, state) do
+    Process.send_after(self(), {:scraping, region}, get_interval(region))
+
+    Task.start(fn ->
+      url = get_url(region)
+      scraper_fun = get_scraper_fun(region)
+      region_prizes = scrape_page(url, scraper_fun)
+      GenServer.cast(__MODULE__, {:scraped, region, region_prizes})
+    end)
+
     {:noreply, state}
   end
 
+
   @impl true
-  def handle_call(request, _from, state) do
-    reply = Map.get(state, request)
-    {:reply, reply, state}
+  def handle_cast({:scraped, region, region_prizes}, state) do
+    :ets.update_element(state, region, region_prizes)
+    {:noreply, state}
   end
 
   def get_region_prizes(region) do
-    GenServer.call(__MODULE__, region)
+    [{^region, region_prizes}] = :ets.lookup(@prizes_table, region)
+    region_prizes
   end
 
-  defp get_lottery_prizes() do
-    Process.send_after(self(), :scraping, get_interval())
-    regions = [:mb, :mt, :mn]
+  defp get_prizes(regions) do
+    pid = self()
 
     stream =
       Task.async_stream(regions, fn region ->
         url = get_url(region)
-        {region, scrape_page(url, get_scraper_fun(region))}
+        scraper_fun = get_scraper_fun(region)
+        Process.send_after(pid, {:scraping, region}, get_interval(region))
+        {region, scrape_page(url, scraper_fun)}
       end)
 
     Enum.into(stream, %{}, fn {:ok, {region, prizes}} -> {region, prizes} end)
@@ -128,7 +149,8 @@ defmodule LotteryApi.Scraper do
     |> String.upcase()
   end
 
-  defp get_current_date(), do: Calendar.strftime(DateTime.now!("Asia/Saigon"), "%d-%m-%Y")
+  @timezone "Asia/Saigon"
+  defp get_current_date(), do: Calendar.strftime(DateTime.now!(@timezone), "%d-%m-%Y")
 
   defp get_url(region) do
     case region do
@@ -138,5 +160,29 @@ defmodule LotteryApi.Scraper do
     end
   end
 
-  defp get_interval(), do: :timer.minutes(1)
+  defp get_interval(region) do
+    now = DateTime.now!(@timezone)
+
+    hour =
+      case region do
+        :mb -> 18
+        :mn -> 16
+        :mt -> 17
+      end
+
+    start_time = %DateTime{now | hour: hour, minute: 15, second: 0}
+    end_time = %DateTime{now | hour: hour, minute: 35, second: 0}
+
+    cond do
+      DateTime.before?(now, start_time) ->
+        DateTime.diff(start_time, now, :millisecond)
+
+      DateTime.after?(now, end_time) ->
+        DateTime.add(start_time, 1, :day)
+        |> DateTime.diff(now, :millisecond)
+
+      true ->
+        :timer.minutes(1)
+    end
+  end
 end

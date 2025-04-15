@@ -20,11 +20,8 @@ defmodule LotteryApi.Router do
     send_resp(conn, 404, "Not found")
   end
 
-  defp get_region(region) do
-    case region do
-      "xsmn" -> :mn
-      "xsmb" -> :mb
-      "xsmt" -> :mt
-    end
-  end
+  defp get_region("xsmb"), do: :mb
+  defp get_region("xsmt"), do: :mt
+  defp get_region("xsmn"), do: :mn
+
 end
