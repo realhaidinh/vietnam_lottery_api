@@ -2,45 +2,10 @@ defmodule LotteryApi.Scraper do
   require Logger
   use GenServer
 
-  def start_link(_opts) do
-    GenServer.start_link(__MODULE__, :ok, name: __MODULE__)
-  end
   @prizes_table :prizes_table
-  @impl true
-  def init(:ok) do
-    opts = [:set, :protected, :named_table, read_concurrency: true, write_concurrency: true]
-    prizes = :ets.new(@prizes_table, opts)
-    {:ok, prizes, {:continue, :scraping}}
-  end
 
-  @impl true
-  def handle_continue(:scraping, prizes) do
-    regions = [:mb, :mn, :mt]
-    for region_prizes <- get_prizes(regions) do
-      :ets.insert(prizes, region_prizes)
-    end
-    {:noreply, prizes}
-  end
-
-  @impl true
-  def handle_info({:scraping, region}, state) do
-    Process.send_after(self(), {:scraping, region}, get_interval(region))
-
-    Task.start(fn ->
-      url = get_url(region)
-      scraper_fun = get_scraper_fun(region)
-      region_prizes = scrape_page(url, scraper_fun)
-      GenServer.cast(__MODULE__, {:scraped, region, region_prizes})
-    end)
-
-    {:noreply, state}
-  end
-
-
-  @impl true
-  def handle_cast({:scraped, region, region_prizes}, state) do
-    :ets.update_element(state, region, region_prizes)
-    {:noreply, state}
+  def start_link(region) do
+    GenServer.start_link(__MODULE__, region, name: region)
   end
 
   def get_region_prizes(region) do
@@ -48,18 +13,48 @@ defmodule LotteryApi.Scraper do
     region_prizes
   end
 
-  defp get_prizes(regions) do
-    pid = self()
+  @impl true
+  def init(region) do
+    opts = [:set, :public, :named_table, read_concurrency: true, write_concurrency: true]
 
-    stream =
-      Task.async_stream(regions, fn region ->
-        url = get_url(region)
-        scraper_fun = get_scraper_fun(region)
-        Process.send_after(pid, {:scraping, region}, get_interval(region))
-        {region, scrape_page(url, scraper_fun)}
-      end)
+    case :ets.whereis(@prizes_table) do
+      :undefined -> :ets.new(@prizes_table, opts)
+      _ -> nil
+    end
 
-    Enum.into(stream, %{}, fn {:ok, {region, prizes}} -> {region, prizes} end)
+    {:ok, region, {:continue, :scraping}}
+  end
+
+  @impl true
+  def handle_continue(:scraping, region) do
+    region_prizes = fetch_region_prizes(region)
+    :ets.insert(@prizes_table, {region, region_prizes})
+    Process.send_after(self(), :scraping, get_interval(region))
+    {:noreply, region}
+  end
+
+  @impl true
+  def handle_info(:scraping, region) do
+    Process.send_after(self(), :scraping, get_interval(region))
+
+    Task.start(fn ->
+      region_prizes = fetch_region_prizes(region)
+      GenServer.cast(__MODULE__, {:scraped, region_prizes})
+    end)
+
+    {:noreply, region}
+  end
+
+  @impl true
+  def handle_cast({:scraped, region_prizes}, region) do
+    :ets.update_element(@prizes_table, region, region_prizes)
+    {:noreply, region}
+  end
+
+  defp fetch_region_prizes(region) do
+    url = get_url(region)
+    scraper_fun = get_scraper_fun(region)
+    scrape_page(url, scraper_fun)
   end
 
   def scrape_page(url, scraper_fun) do
@@ -114,11 +109,17 @@ defmodule LotteryApi.Scraper do
     |> Enum.group_by(
       fn {_, %{"class" => tier}, _} ->
         case region do
-          :mb -> String.split(tier, "-") |> Enum.at(1) |> String.upcase()
+          :mb -> String.split(tier, [" ", "-"]) |> Enum.at(1) |> String.upcase()
           _ -> tier
         end
       end,
-      &Enum.join(elem(&1, 2))
+      fn {_, _, res} ->
+        case res do
+          [{_, _, [number]}] -> number
+          [number] -> number
+          list -> list
+        end
+      end
     )
   end
 
@@ -130,10 +131,16 @@ defmodule LotteryApi.Scraper do
 
   defp update_cities_prizes(cities, prizes) do
     Enum.reduce(prizes, cities, fn {tier, numbers}, prev_cities ->
-      tier = format_tier(tier)
+      formatted_tier = format_tier(tier)
 
       Enum.zip_with(prev_cities, numbers, fn city, number ->
-        update_in(city[:prizes][tier], fn
+        number =
+          cond do
+            String.ends_with?(tier, ["imgloadig", "cl-rl"]) -> "Đang xổ số"
+            true -> number
+          end
+
+        update_in(city[:prizes][formatted_tier], fn
           nil -> [number]
           prizes -> [number | prizes]
         end)
@@ -144,7 +151,7 @@ defmodule LotteryApi.Scraper do
   defp format_tier(tier) do
     tier
     |> String.trim()
-    |> String.split("-")
+    |> String.split(["-", " "])
     |> Enum.at(1)
     |> String.upcase()
   end
@@ -182,7 +189,7 @@ defmodule LotteryApi.Scraper do
         |> DateTime.diff(now, :millisecond)
 
       true ->
-        :timer.minutes(1)
+        :timer.seconds(15)
     end
   end
 end
