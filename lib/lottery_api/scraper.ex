@@ -27,7 +27,7 @@ defmodule LotteryApi.Scraper do
 
   @impl true
   def handle_continue(:scraping, region) do
-    region_prizes = fetch_region_prizes(region)
+    region_prizes = fetch_region_prize(region)
     :ets.insert(@prizes_table, {region, region_prizes})
     Process.send_after(self(), :scraping, get_interval(region))
     {:noreply, region}
@@ -38,7 +38,7 @@ defmodule LotteryApi.Scraper do
     Process.send_after(self(), :scraping, get_interval(region))
 
     Task.start(fn ->
-      region_prizes = fetch_region_prizes(region)
+      region_prizes = fetch_region_prize(region)
       GenServer.cast(__MODULE__, {:scraped, region_prizes})
     end)
 
@@ -51,7 +51,7 @@ defmodule LotteryApi.Scraper do
     {:noreply, region}
   end
 
-  defp fetch_region_prizes(region) do
+  defp fetch_region_prize(region) do
     url = get_url(region)
     scraper_fun = get_scraper_fun(region)
     scrape_page(url, scraper_fun)
@@ -79,7 +79,7 @@ defmodule LotteryApi.Scraper do
     fn document ->
       prizes_table = get_prizes_table(document)
       prizes = get_prizes(prizes_table, region)
-      result = %{date: get_current_date()}
+      result = %{date: get_date(document)}
 
       case region do
         :mb ->
@@ -93,6 +93,19 @@ defmodule LotteryApi.Scraper do
           Map.put(result, :cities, cities)
       end
     end
+  end
+
+  defp get_date(document) do
+    href =
+      document
+      |> Floki.find("div.tit-mien")
+      |> List.first()
+      |> Floki.find("a:nth-child(3)")
+      |> Floki.attribute("href")
+      |> List.first()
+
+    <<_::binary-21, date::binary-size(byte_size(href) - 26), _::binary-5>> = href
+    date
   end
 
   defp get_prizes_table(document) do
@@ -109,15 +122,15 @@ defmodule LotteryApi.Scraper do
     |> Enum.group_by(
       fn {_, %{"class" => tier}, _} ->
         case region do
-          :mb -> String.split(tier, [" ", "-"]) |> Enum.at(1) |> String.upcase()
+          :mb -> format_tier(tier)
           _ -> tier
         end
       end,
-      fn {_, _, res} ->
-        case res do
+      fn {_, _, element} ->
+        case element do
           [{_, _, [number]}] -> number
           [number] -> number
-          list -> list
+          list -> Enum.join(list)
         end
       end
     )
@@ -156,26 +169,15 @@ defmodule LotteryApi.Scraper do
     |> String.upcase()
   end
 
+  defp get_url(:mb), do: "https://az24.vn/xsmb-sxmb-xo-so-mien-bac.html"
+  defp get_url(:mn), do: "https://az24.vn/xsmn-sxmn-xo-so-mien-nam.html"
+  defp get_url(:mt), do: "https://az24.vn/xsmt-sxmt-xo-so-mien-trung.html"
+
   @timezone "Asia/Saigon"
-  defp get_current_date(), do: Calendar.strftime(DateTime.now!(@timezone), "%d-%m-%Y")
-
-  defp get_url(region) do
-    case region do
-      :mb -> "https://az24.vn/xsmb-sxmb-xo-so-mien-bac.html"
-      :mn -> "https://az24.vn/xsmn-sxmn-xo-so-mien-nam.html"
-      :mt -> "https://az24.vn/xsmt-sxmt-xo-so-mien-trung.html"
-    end
-  end
-
   defp get_interval(region) do
     now = DateTime.now!(@timezone)
 
-    hour =
-      case region do
-        :mb -> 18
-        :mn -> 16
-        :mt -> 17
-      end
+    hour = get_region_hour(region)
 
     start_time = %DateTime{now | hour: hour, minute: 15, second: 0}
     end_time = %DateTime{now | hour: hour, minute: 35, second: 0}
@@ -189,7 +191,11 @@ defmodule LotteryApi.Scraper do
         |> DateTime.diff(now, :millisecond)
 
       true ->
-        :timer.seconds(15)
+        :timer.seconds(10)
     end
   end
+
+  def get_region_hour(:mb), do: 18
+  def get_region_hour(:mt), do: 17
+  def get_region_hour(:mn), do: 16
 end
