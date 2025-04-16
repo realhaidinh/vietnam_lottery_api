@@ -1,6 +1,6 @@
 defmodule LotteryApi.Router do
   use Plug.Router
-  alias LotteryApi.Scraper
+  alias LotteryApi.Cache
 
   plug(:match)
   plug(:dispatch)
@@ -9,7 +9,7 @@ defmodule LotteryApi.Router do
     body =
       region
       |> get_region()
-      |> Scraper.get_region_prizes()
+      |> Cache.get()
       |> JSON.encode_to_iodata!()
 
     conn = put_resp_content_type(conn, "application/json")

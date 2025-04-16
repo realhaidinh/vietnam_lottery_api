@@ -9,19 +9,14 @@ defmodule LotteryApi.Application do
     children = [
       # Starts a worker by calling: LotteryApi.Worker.start_link(arg)
       # {LotteryApi.Worker, arg}
+      LotteryApi.Cache,
+      LotteryApi.Scraper.Supervisor,
       {Bandit, plug: LotteryApi.Router}
     ]
-    children = get_children() ++ children
     # See https://hexdocs.pm/elixir/Supervisor.html
     # for other strategies and supported options
     opts = [strategy: :one_for_one, name: LotteryApi.Supervisor]
     Supervisor.start_link(children, opts)
   end
 
-  defp get_children do
-    regions = [:mb, :mt, :mn]
-    Enum.map(regions, fn region ->
-      Supervisor.child_spec({LotteryApi.Scraper, region}, id: region)
-    end)
-  end
 end
