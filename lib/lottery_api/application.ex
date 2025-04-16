@@ -11,7 +11,7 @@ defmodule LotteryApi.Application do
       # {LotteryApi.Worker, arg}
       {Bandit, plug: LotteryApi.Router}
     ]
-    children = children ++ get_children()
+    children = get_children() ++ children
     # See https://hexdocs.pm/elixir/Supervisor.html
     # for other strategies and supported options
     opts = [strategy: :one_for_one, name: LotteryApi.Supervisor]
