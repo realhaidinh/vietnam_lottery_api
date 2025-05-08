@@ -23,5 +23,4 @@ defmodule LotteryApi.Router do
   defp get_region("xsmb"), do: :mb
   defp get_region("xsmt"), do: :mt
   defp get_region("xsmn"), do: :mn
-
 end
